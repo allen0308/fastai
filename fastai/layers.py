@@ -19,7 +19,7 @@ def ResizeBatch(*size:int) -> Tensor:
     return Lambda(lambda x: x.view((-1,)+size))
 
 def Flatten()->Tensor:
-    "Flattens `x` to a single dimension, often used at the end of a model."
+    "Flatten `x` to a single dimension, often used at the end of a model."
     return Lambda(lambda x: x.view((x.size(0), -1)))
 
 def PoolFlatten()->nn.Sequential:
@@ -27,7 +27,7 @@ def PoolFlatten()->nn.Sequential:
     return nn.Sequential(nn.AdaptiveAvgPool2d(1), Flatten())
 
 def bn_drop_lin(n_in:int, n_out:int, bn:bool=True, p:float=0., actn:Optional[nn.Module]=None):
-    "`n_in`->bn->dropout->linear(`n_in`,`n_out`)->`actn`"
+    "Sequence of batchnorm (if `bn`), dropout (with `p`) and linear (`n_in`,`n_out`) layers followed by `actn`."
     layers = [nn.BatchNorm1d(n_in)] if bn else []
     if p != 0: layers.append(nn.Dropout(p))
     layers.append(nn.Linear(n_in, n_out))
@@ -35,16 +35,17 @@ def bn_drop_lin(n_in:int, n_out:int, bn:bool=True, p:float=0., actn:Optional[nn.
     return layers
 
 def conv2d(ni:int, nf:int, ks:int=3, stride:int=1, padding:int=None, bias=False, init:LayerFunc=nn.init.kaiming_normal_) -> nn.Conv2d:
-    "Create `nn.Conv2d` layer: `ni` inputs, `nf` outputs, `ks` kernel size. `padding` defaults to `k//2`."
+    "Create and initialize `nn.Conv2d` layer. `padding` defaults to `ks//2`."
     if padding is None: padding = ks//2
     return init_default(nn.Conv2d(ni, nf, kernel_size=ks, stride=stride, padding=padding, bias=bias), init)
 
 def conv2d_trans(ni:int, nf:int, ks:int=2, stride:int=2, padding:int=0, bias=False) -> nn.ConvTranspose2d:
-    "Create `nn.ConvTranspose2d` layer: `ni` inputs, `nf` outputs, `ks` kernel size, `stride`: stride. `padding` defaults to 0."
+    "Create `nn.ConvTranspose2d` layer."
     return nn.ConvTranspose2d(ni, nf, kernel_size=ks, stride=stride, padding=padding, bias=bias)
 
 def conv_layer(ni:int, nf:int, ks:int=3, stride:int=1, padding:int=None, bias:bool=None, bn:bool=True, use_activ:bool=True,
-               leaky:float=None, transpose:bool=False, wn:bool=False, init:Callable=nn.init.kaiming_normal_):
+               leaky:float=None, transpose:bool=False, wn:bool=False, init:Callable=nn.init.kaiming_normal_, bn_zero=False):
+    "Create a sequence of convolutional (`ni` to `nf`), ReLU (if `use_activ`) and batchnorm (if `bn`) layers."
     if padding is None: padding = (ks-1)//2 if not transpose else 0
     if wn: bn=False
     if bias is None:
@@ -55,8 +56,21 @@ def conv_layer(ni:int, nf:int, ks:int=3, stride:int=1, padding:int=None, bias:bo
     layers = [conv]
     if use_activ:
         layers.append(nn.LeakyReLU(inplace=True, negative_slope=leaky) if leaky is not None else nn.ReLU(inplace=True))
-    if bn: layers.append(nn.BatchNorm2d(nf))
+    if bn:
+        bn_l = nn.BatchNorm2d(nf)
+        with torch.no_grad():
+            bn_l.bias.fill_(1e-3)
+            bn_l.weight.fill_(0. if bn_zero else 1.)
+        layers.append(bn_l)
     return nn.Sequential(*layers)
+
+class SequentialResBlock(nn.Module):
+    "A resnet block using an `nn.Sequential` containing `layers`"
+    def __init__(self, *layers):
+        super().__init__()
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x): return x + self.layers(x)
 
 class AdaptiveConcatPool2d(nn.Module):
     "Layer that concats `AdaptiveAvgPool2d` and `AdaptiveMaxPool2d`."
