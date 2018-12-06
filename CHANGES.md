@@ -10,19 +10,78 @@ Note that the top-most release is changes in the unreleased master branch on
 Github. Parentheses after an item show the name or github id of the contributor
 of that change.
 
-## 1.0.31.dev0 (Work In Progress)
+
+
+
+## 1.0.34.dev0 (Work In Progress)
+
+### New:
+
+### Changed:
+
+### Fixed:
+
+
+
+## 1.0.33 (2018-12-05)
+
+### New:
+
+- `Learner.interpret` is a shortcut to `ClassificationLearner.from_learner`.
+
+### Changed:
+
+- Language models now use flattened loss, instead of flattening y in data loader
+- `ItemList.from_folder` now has an `include` parameter to only include certain folders
+
+### Fixed:
+
+- `Learner.load` won't throw an error when trying to load an optimizer state of
+  the wrong size, and silently ignore that optimizer state loading
+
+
+## 1.0.32 (2018-12-02)
+
+### New:
+
+### Changed:
+
+- `TabularDatBunch.from_df` accepts a `test_df` argument
+
+### Fixed:
+
+- `LanguageLearner.predict` now returns better text predictions
+- Unfreezing layers didn't create a new optimizer so the unfrozen layers weren't training
+- Bug in `TextDataBunch` with a mistmatched test set was causing problems on the validation set
+
+
+## 1.0.31 (2018-12-01)
 
 ### New:
 
 - `SequentialResBlock` to easily create resnet blocks
+- `ImageCleaner` with duplicates=True to use as a duplicate detector
+- `DatasetFormatter.from_similars()` to feed the most similar indexes into `ImageCleaner`
+- `chunks` to separate a Collection into smaller iterables
+- `batchnorm_2d` wrapper for batchnorm with init
 
 ### Changed:
 
+- `Learner.load` and `Learner.save` will also load/save the optimizer state
 - `ImageItemList` now takes optional `convert_mode`
 - `Image.show` now uses `defaults.cmap` if no `cmap` passed
+- `bn` param in `conv_layer` replaced by `norm_type` which takes `NormType` enum
+- unet kwargs are passed down to `conv_layer`
+- `Learner.fit` no longer creates a new optimizer at each call
+- Add batchnorm to end of unet
+- Restore `ImageDataBunch.single_from_classes`
+- `ItemList.set_item` is now a context manager, so you don't need to call `clear_item`
+- Removed `ItemList.clear_item`
+- Init `torch.set_num_threads(4)` to avoid OpenMP process creation overhead
 
 ### Fixed:
 
+- `Tokenizer` wasn't using >1 thread
 
 ## 1.0.30 (2018-11-28)
 

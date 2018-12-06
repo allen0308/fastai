@@ -1,6 +1,6 @@
 from .torch_core import *
 from .basic_data import *
-from .layers import MSELossFlat
+from .layers import *
 
 __all__ = ['ItemList', 'CategoryList', 'MultiCategoryList', 'MultiCategoryProcessor', 'LabelList', 'ItemLists', 'get_files',
            'PreProcessor', 'LabelLists', 'FloatList', 'CategoryProcessor']
@@ -16,14 +16,16 @@ def _get_files(parent, p, f, extensions):
            and (extensions is None or f'.{o.split(".")[-1].lower()}' in extensions)]
     return res
 
-def get_files(path:PathOrStr, extensions:Collection[str]=None, recurse:bool=False)->FilePathList:
-    "Return list of files in `path` that have a suffix in `extensions`. `recurse` determines if we search subfolders."
+def get_files(path:PathOrStr, extensions:Collection[str]=None, recurse:bool=False,
+              include:Optional[Collection[str]]=None)->FilePathList:
+    "Return list of files in `path` that have a suffix in `extensions`; optionally `recurse`."
     if recurse:
         res = []
         for p,d,f in os.walk(path):
-                # skip hidden dirs
-                d[:] = [o for o in d if not o.startswith('.')]
-                res += _get_files(path, p, f, extensions)
+            # skip hidden dirs
+            if include is not None: d[:] = [o for o in d if o in include]
+            else:                   d[:] = [o for o in d if not o.startswith('.')]
+            res += _get_files(path, p, f, extensions)
         return res
     else:
         f = [o.name for o in os.scandir(path) if o.is_file()]
@@ -51,7 +53,7 @@ class ItemList():
 
     def __post_init__(self): pass
     def __len__(self)->int: return len(self.items) or 1
-    def get(self, i)->Any:  
+    def get(self, i)->Any:
         "Subclass if you want to customize how to create item `i` from `self.items`."
         return self.items[i]
     def __repr__(self)->str:
@@ -91,10 +93,11 @@ class ItemList():
         else: return self.new(self.items[idxs], xtra=index_row(self.xtra, idxs))
 
     @classmethod
-    def from_folder(cls, path:PathOrStr, extensions:Collection[str]=None, recurse=True, **kwargs)->'ItemList':
+    def from_folder(cls, path:PathOrStr, extensions:Collection[str]=None, recurse=True,
+                    include:Optional[Collection[str]]=None, **kwargs)->'ItemList':
         "Create an `ItemList` in `path` from the filenames that have a suffix in `extensions`. `recurse` determines if we search subfolders."
         path = Path(path)
-        return cls(get_files(path, extensions, recurse=recurse), path=path, **kwargs)
+        return cls(get_files(path, extensions, recurse=recurse, include=include), path=path, **kwargs)
 
     @classmethod
     def from_df(cls, df:DataFrame, path:PathOrStr='.', cols:IntsOrStrs=0, **kwargs)->'ItemList':
@@ -111,6 +114,13 @@ class ItemList():
 
     def _relative_item_path(self, i): return self.items[i].relative_to(self.path)
     def _relative_item_paths(self):   return [self._relative_item_path(i) for i in range_of(self.items)]
+
+    def use_partial_data(self, sample_pct:float=1.0, seed:int=None)->'ItemList':
+        "Use only a sample of `sample_pct`of the full dataset and an optional `seed`."
+        if seed is not None: np.random.seed(seed)
+        rand_idx = np.random.permutation(range_of(self))
+        cut = int(sample_pct * len(self))
+        return self[rand_idx[:cut]]
 
     def to_text(self, fn:str):
         "Save `self.items` to `fn` in `self.path`."
@@ -253,7 +263,10 @@ class CategoryProcessor(PreProcessor):
         "Generate classes from `items` by taking the sorted unique values."
         return uniqueify(items)
 
-    def process_one(self,item): return self.c2i.get(item,None)
+    def process_one(self,item): 
+        try: return self.c2i.get(item)
+        except: 
+            raise Exception("Your validation data contains a label that isn't present in the training set, please fix your data.")
 
     def process(self, ds):
         if self.classes is None: self.create_classes(self.generate_classes(ds.items))
@@ -281,7 +294,7 @@ class CategoryList(CategoryListBase):
     _processor=CategoryProcessor
     def __init__(self, items:Iterator, classes:Collection=None, **kwargs):
         super().__init__(items, classes=classes, **kwargs)
-        self.loss_func = F.cross_entropy
+        self.loss_func = CrossEntropyFlat()
 
     def get(self, i):
         o = self.items[i]
@@ -311,7 +324,7 @@ class MultiCategoryList(CategoryListBase):
     def __init__(self, items:Iterator, classes:Collection=None, sep:str=None, **kwargs):
         if sep is not None: items = array(csv.reader(items.astype(str), delimiter=sep))
         super().__init__(items, classes=classes, **kwargs)
-        self.loss_func = F.binary_cross_entropy_with_logits
+        self.loss_func = BCEWithLogitsFlat()
 
     def get(self, i):
         o = self.items[i]
@@ -347,7 +360,7 @@ class ItemLists():
         if isinstance(self.train, LabelList): self.__class__ = LabelLists
 
     def __repr__(self)->str:
-        return f'{self.__class__.__name__};\nTrain: {self.train};\nValid: {self.valid};\nTest: {self.test}'
+        return f'{self.__class__.__name__};\n\nTrain: {self.train};\n\nValid: {self.valid};\n\nTest: {self.test}'
 
     def __getattr__(self, k):
         ft = getattr(self.train, k)
@@ -424,7 +437,7 @@ class LabelLists(ItemLists):
         return self
 
     def add_test_folder(self, test_folder:str='test', label:Any=None):
-        "Add test set containing items from `test_folder` and an arbitrary `label`."
+        "Add test set containing items from `test_folder` and an arbitrary `label`. No labels will be collected if available. Instead, either the passed `label` or a first label from train_ds will be used for all entries. If you want to use the test dataset with labels, you probably need to use it as a valid set, via split_by_folder(train='train', valid='test')"
         items = self.x.__class__.from_folder(self.path/test_folder)
         return self.add_test(items.items, label=label)
 
@@ -437,16 +450,18 @@ class LabelList(Dataset):
         self.transform(tfms, **kwargs)
 
     def __len__(self)->int: return len(self.x) if self.item is None else 1
-    def set_item(self,item): 
+
+    @contextmanager
+    def set_item(self,item):
         "For inference, will replace the dataset with one that only contains `item`."
         self.item = self.x.process_one(item)
-    def clear_item(self):
-        "Clear the item set in `set_item`."
+        yield None
         self.item = None
+
     def __repr__(self)->str:
         x = f'{self.x}' # force this to happen first
         return f'{self.__class__.__name__}\ny: {self.y}\nx: {x}'
-    def predict(self, res): 
+    def predict(self, res):
         "Delegates predict call on `res` to `self.y`."
         return self.y.predict(res)
 
@@ -506,12 +521,6 @@ class LabelList(Dataset):
         self.x.process(xp)
         return self
 
-    @classmethod
-    def from_lists(cls, path:PathOrStr, inputs, labels)->'LabelList':
-        "Create a `LabelList` in `path` with `inputs` and `labels`."
-        inputs,labels = np.array(inputs),np.array(labels)
-        return cls(np.concatenate([inputs[:,None], labels[:,None]], 1), path)
-
     def transform(self, tfms:TfmList, tfm_y:bool=None, **kwargs):
         "Set the `tfms` and `tfm_y` value to be applied to the inputs and targets."
         self.tfms,self.tfmargs = tfms,kwargs
@@ -532,4 +541,3 @@ def _databunch_load_empty(cls, path, fname:str='export.pkl', tfms:TfmList=None, 
     return cls.create(ds,ds,path=path)
 
 DataBunch.load_empty = _databunch_load_empty
-

@@ -4,10 +4,10 @@ from .basic_data import *
 from .callback import *
 
 __all__ = ['Learner', 'LearnerCallback', 'Recorder', 'RecordOnCPU', 'fit', 'loss_batch', 'train_epoch', 'validate',
-           'get_preds', 'default_lr', 'default_wd']
+           'get_preds']
 
-default_lr = slice(3e-3)
-default_wd = 1e-2
+defaults.lr = slice(3e-3)
+defaults.wd = 1e-2
 
 def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor, loss_func:OptLossFunc=None, opt:OptOptimizer=None,
                cb_handler:Optional[CallbackHandler]=None)->Tuple[Union[Tensor,int,float,str]]:
@@ -94,12 +94,18 @@ def fit(epochs:int, model:nn.Module, loss_func:LossFunction, opt:optim.Optimizer
         raise e
     finally: cb_handler.on_train_end(exception)
 
-loss_func_name2activ = {'cross_entropy_loss': partial(F.softmax, dim=1), 'nll_loss': torch.exp, 'poisson_nll_loss': torch.exp,
-    'kl_div_loss': torch.exp, 'bce_with_logits_loss': torch.sigmoid, 'cross_entropy_flat': partial(F.softmax, dim=1),
-    'cross_entropy': partial(F.softmax, dim=1), 'kl_div': torch.exp, 'binary_cross_entropy_with_logits': torch.sigmoid
+loss_func_name2activ = {'cross_entropy_loss': partial(F.softmax, dim=-1), 'nll_loss': torch.exp, 'poisson_nll_loss': torch.exp,
+    'kl_div_loss': torch.exp, 'bce_with_logits_loss': torch.sigmoid, 'cross_entropy': partial(F.softmax, dim=1),
+    'kl_div': torch.exp, 'binary_cross_entropy_with_logits': torch.sigmoid,
 }
 
 def _loss_func2activ(loss_func):
+    if getattr(loss_func,'keywords',None):
+        if not loss_func.keywords.get('log_input', True): return
+    # flattened loss
+    loss_func = getattr(loss_func, 'func', loss_func)
+    # could have a partial inside flattened loss!
+    loss_func = getattr(loss_func, 'func', loss_func)
     cls_name = camel2snake(loss_func.__class__.__name__)
     if cls_name == 'mix_up_loss':
         loss_func = loss_func.crit
@@ -107,9 +113,6 @@ def _loss_func2activ(loss_func):
     if cls_name in loss_func_name2activ:
         if cls_name == 'poisson_nll_loss' and (not getattr(loss_func, 'log_input', True)): return
         return loss_func_name2activ[cls_name]
-    if hasattr(loss_func, 'func'):
-        if loss_func.func.__name__ == 'poisson_nll_loss' and (not loss_func.keywords.get('log_input', True)): return
-        loss_func = loss_func.func
     if getattr(loss_func,'__name__','') in loss_func_name2activ:
         return loss_func_name2activ[loss_func.__name__]
     return noop
@@ -124,7 +127,7 @@ class Learner():
     metrics:Collection[Callable]=None
     true_wd:bool=True
     bn_wd:bool=True
-    wd:Floats=default_wd
+    wd:Floats=defaults.wd
     train_bn:bool=True
     path:str = None
     model_dir:str = 'models'
@@ -151,12 +154,13 @@ class Learner():
         else: res = [lr.stop/10]*(len(self.layer_groups)-1) + [lr.stop]
         return np.array(res)
 
-    def fit(self, epochs:int, lr:Union[Floats,slice]=default_lr,
+    def fit(self, epochs:int, lr:Union[Floats,slice]=defaults.lr,
             wd:Floats=None, callbacks:Collection[Callback]=None)->None:
         "Fit the model on this learner with `lr` learning rate, `wd` weight decay for `epochs` with `callbacks`."
         lr = self.lr_range(lr)
         if wd is None: wd = self.wd
-        self.create_opt(lr, wd)
+        if not getattr(self, 'opt', False): self.create_opt(lr, wd)
+        else: self.opt.lr,self.opt.wd = lr,wd
         callbacks = [cb(self) for cb in self.callback_fns] + listify(callbacks)
         fit(epochs, self.model, self.loss_func, opt=self.opt, data=self.data, metrics=self.metrics,
             callbacks=self.callbacks+callbacks)
@@ -176,33 +180,46 @@ class Learner():
             for l in g:
                 if not self.train_bn or not isinstance(l, bn_types): requires_grad(l, False)
         for g in self.layer_groups[n:]: requires_grad(g, True)
+        self.create_opt(defaults.lr)
 
     def freeze(self)->None:
         "Freeze up to last layer."
         assert(len(self.layer_groups)>1)
         self.freeze_to(-1)
+        self.create_opt(defaults.lr)
 
     def unfreeze(self):
         "Unfreeze entire model."
         self.freeze_to(0)
+        self.create_opt(defaults.lr)
 
     def __del__(self): del(self.model, self.data)
 
-    def save(self, name:PathOrStr, return_path:bool=False)->Union[None,str]:
-        "Save model with `name` to `self.model_dir`, and return path if `return_path`."
+    def save(self, name:PathOrStr, return_path:bool=False, with_opt:bool=True):
+        "Save model and optimizer state (if `with_opt`) with `name` to `self.model_dir`."
         path = self.path/self.model_dir/f'{name}.pth'
-        torch.save(self.model.state_dict(), path)
+        if not with_opt: state = self.model.state_dict()
+        else: state = {'model': self.model.state_dict(), 'opt':self.opt.state_dict()}
+        torch.save(state, path)
         if return_path: return path
 
     def dl(self, ds_type:DatasetType=DatasetType.Valid):
         "Return DataLoader for DatasetType `ds_type`."
         return self.data.dl(ds_type)
 
-    def load(self, name:PathOrStr, device:torch.device=None, strict:bool=True):
-        "Load model `name` from `self.model_dir` using `device`, defaulting to `self.data.device`."
+    def load(self, name:PathOrStr, device:torch.device=None, strict:bool=True, with_opt:bool=None):
+        "Load model and optimizer state (if `with_opt`) `name` from `self.model_dir` using `device`."
         if device is None: device = self.data.device
-        self.model.load_state_dict(torch.load(self.path/self.model_dir/f'{name}.pth', map_location=device),
-                                   strict=strict)
+        state = torch.load(self.path/self.model_dir/f'{name}.pth', map_location=device)
+        if set(state.keys()) == {'model', 'opt'}:
+            self.model.load_state_dict(state['model'], strict=strict)
+            if ifnone(with_opt,True):
+                if not hasattr(self, 'opt'): opt = self.create_opt(defaults.lr, self.wd)
+                try:    self.opt.load_state_dict(state['opt'])
+                except: pass
+        else:
+            if with_opt: warn("Saved filed doesn't contain an optimizer state.")
+            self.model.load_state_dict(state, strict=strict)
         return self
 
     def get_preds(self, ds_type:DatasetType=DatasetType.Valid, with_loss:bool=False, n_batch:Optional[int]=None,
@@ -267,8 +284,8 @@ class Learner():
         if norm:
             x = self.data.denorm(x)
             if norm.keywords.get('do_y',True):
-                y     = self.data.denorm(y)
-                preds = self.data.denorm(preds)
+                y     = self.data.denorm(y, do_x=True)
+                preds = self.data.denorm(preds, do_x=True)
         analyze_kwargs,kwargs = split_kwargs_by_func(kwargs, ds.y.analyze_pred)
         preds = [ds.y.analyze_pred(grab_idx(preds, i), **analyze_kwargs) for i in range(rows)]
         xs = [ds.x.reconstruct(grab_idx(x, i, self.data._batch_first)) for i in range(rows)]
@@ -289,8 +306,9 @@ class RecordOnCPU(Callback):
 class LearnerCallback(Callback):
     "Base class for creating callbacks for a `Learner`."
     learn: Learner
-    def __post_init__(self):
-        if self.cb_name: setattr(self.learn, self.cb_name, self)
+    def __post_init__(self): setattr(self.learn, self.cb_name, self)
+
+    def __getattr__(self,k): return getattr(self.learn, k)
 
     @property
     def cb_name(self): return camel2snake(self.__class__.__name__)
@@ -310,7 +328,7 @@ class Recorder(LearnerCallback):
         self.names = ['epoch', 'train_loss'] if self.no_val else ['epoch', 'train_loss', 'valid_loss']
         self.names += metrics_names
         if hasattr(self, '_added_met_names'): self.names += self._added_met_names
-        self.pbar.write('  '.join(self.names), table=True)
+        self.pbar.write(self.names, table=True)
         self.losses,self.val_losses,self.lrs,self.moms,self.metrics,self.nb_batches = [],[],[],[],[],[]
 
     def on_batch_begin(self, train, **kwargs:Any)->None:
@@ -341,10 +359,8 @@ class Recorder(LearnerCallback):
         "Format stats before printing."
         str_stats = []
         for name,stat in zip(self.names,stats):
-            t = '' if stat is None else str(stat) if isinstance(stat, int) else f'{stat:.6f}'
-            t += ' ' * (len(name) - len(t))
-            str_stats.append(t)
-        self.pbar.write('  '.join(str_stats), table=True)
+            str_stats.append('' if stat is None else str(stat) if isinstance(stat, int) else f'{stat:.6f}')
+        self.pbar.write(str_stats, table=True)
 
     def add_metrics(self, metrics):
         "Add `metrics` to the inner stats."
