@@ -263,9 +263,9 @@ class CategoryProcessor(PreProcessor):
         "Generate classes from `items` by taking the sorted unique values."
         return uniqueify(items)
 
-    def process_one(self,item): 
+    def process_one(self,item):
         try: return self.c2i.get(item)
-        except: 
+        except:
             raise Exception("Your validation data contains a label that isn't present in the training set, please fix your data.")
 
     def process(self, ds):
@@ -428,18 +428,27 @@ class LabelLists(ItemLists):
         return self.x._bunch.create(self.train, self.valid, test_ds=self.test, path=path, **kwargs)
 
     def add_test(self, items:Iterator, label:Any=None):
-        "Add test set containing `items` with an arbitrary `label`"
+        "Add test set containing `items` with an arbitrary `label`."
         # if no label passed, use label of first training item
-        if label is None: label = self.train[0][1].obj
-        labels = [label for _ in range_of(items)]
+        if label is None:
+            if len(self.items)>0: label = self.train[0][1].obj
+        labels = [label] * len(items)
         if isinstance(items, ItemList): self.test = self.valid.new(items.items, labels, xtra=items.xtra)
         else: self.test = self.valid.new(items, labels)
         return self
 
     def add_test_folder(self, test_folder:str='test', label:Any=None):
-        "Add test set containing items from `test_folder` and an arbitrary `label`. No labels will be collected if available. Instead, either the passed `label` or a first label from train_ds will be used for all entries. If you want to use the test dataset with labels, you probably need to use it as a valid set, via split_by_folder(train='train', valid='test')"
+        "Add test set containing items from `test_folder` and an arbitrary `label`."
+        # note: labels will be ignored if available in the test dataset
         items = self.x.__class__.from_folder(self.path/test_folder)
         return self.add_test(items.items, label=label)
+
+    @classmethod
+    def load_empty(cls, fn:PathOrStr, tfms:TfmList=None, tfm_y:bool=False, **kwargs):
+        train_ds = LabelList.load_empty(fn, tfms=tfms[0], tfm_y=tfm_y, **kwargs)
+        valid_ds = LabelList.load_empty(fn, tfms=tfms[1], tfm_y=tfm_y, **kwargs)
+        return LabelLists(valid_ds.path, train=train_ds, valid=valid_ds)
+
 
 class LabelList(Dataset):
     "A list of inputs `x` and labels `y` with optional `tfms`."
@@ -486,6 +495,7 @@ class LabelList(Dataset):
                 x = x.apply_tfms(self.tfms, **self.tfmargs)
             if hasattr(self, 'tfms_y') and self.tfm_y and self.item is None:
                 y = y.apply_tfms(self.tfms_y, **{**self.tfmargs_y, 'do_resolve':False})
+            if y is None: y=0
             return x,y
         else: return self.new(self.x[idxs], self.y[idxs])
 
@@ -537,7 +547,8 @@ class LabelList(Dataset):
 @classmethod
 def _databunch_load_empty(cls, path, fname:str='export.pkl', tfms:TfmList=None, tfm_y:bool=False, **kwargs):
     "Load an empty `DataBunch` from the exported file in `path/fname` with optional `tfms`."
-    ds = LabelList.load_empty(path/fname, tfms=(None if tfms is None else tfms[1]), tfm_y=tfm_y, **kwargs)
-    return cls.create(ds,ds,path=path)
+    sd = LabelLists.load_empty(path/fname, tfms=tfms, tfm_y=tfm_y, **kwargs)
+    return sd.databunch()
 
 DataBunch.load_empty = _databunch_load_empty
+
