@@ -18,6 +18,9 @@ entries:
     - output: web,pdf
       title: Troubleshooting
       url: /troubleshoot.html
+    - output: web,pdf
+      title: Performance
+      url: /performance.html
     output: web
     title: Getting started
   - folderitems:
@@ -94,6 +97,9 @@ entries:
         - output: web,pdf
           title: vision.data
           url: /vision.data.html
+        - output: web,pdf
+          title: vision.gan
+          url: /vision.gan.html
         - output: web,pdf
           title: vision.model overview
           url: /vision.models.html
