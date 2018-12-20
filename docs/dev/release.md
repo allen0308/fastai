@@ -52,8 +52,11 @@ You can skip this step if you have done it once already on the system you're mak
 
     You don't really need it, as the anaconda client cashes your credentials so you need to login only infrequently.
 
+4. Install upload clients
 
-
+   ```
+   conda install anaconda-client twine
+   ```
 
 
 ## Quick Release Process
@@ -78,8 +81,9 @@ If you need to make a hotfix to an already released version, follow the [Hotfix 
 Here is the "I'm feeling lucky" version, do not attempt unless you understand the build process.
 
 ```
-make release
+make release 2>&1 | tee release-`date +"%Y-%m-%d-%H:%M:%S"`.log
 ```
+Ideally, don't remove the part that saves the full log - you might need it later.
 
 `make test`'s non-deterministic tests may decide to fail right during the release rites. It has now been moved to the head of the process, so if it fails not due to a bug but due to its unreliability, it won't affect the release process. Just rerun `make release` again.
 
@@ -87,7 +91,7 @@ Here is the quick version that includes all the steps w/o the explanations. If y
 
 ```
 make tools-update
-make master-branch-switch && make git-not-dirty
+make master-branch-switch && make sanity-check
 make test
 make bump && make changes-finalize
 make release-branch-create && make commit-version
@@ -134,10 +138,13 @@ The starting point of the workflow is a dev version of the master branch. For th
     make master-branch-switch    # git checkout master
     ```
 
-4. check-dirty - git cleanup/stash/commit so there is nothing in the way
+4. do sanity checks:
+
+    * check-dirty - git cleanup/stash/commit so there is nothing in the way
+    * version number is not messed up
 
     ```
-    make git-not-dirty || echo "Commit changes before proceeding"
+    make sanity-check
     ```
 
 5. pick a starting point
@@ -963,7 +970,7 @@ If something found to be wrong in the last release, yet the HEAD is unstable to 
 5. Commit and push all the changes to the branch.
 
    ```
-   make commit-dev-cycle-push
+   make commit-hotfix-push
    ```
 
 6. Make a new tag with the new version.
@@ -1204,8 +1211,8 @@ platform are shown):
 * To find out why a particular package is installed (i.e. which package requires it):
 
     ```
-    conda create -n c43 conda=4.3
-    conda activate c43
+    conda create -n conda-4.3 conda=4.3
+    conda activate conda-4.3
     python -m conda search --reverse-dependency --full-name pillow
     ```
 

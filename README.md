@@ -48,8 +48,9 @@ Note that JPEG decoding can be a bottleneck, particularly if you have a fast GPU
 ```bash
 conda uninstall --force jpeg libtiff -y
 conda install -c conda-forge libjpeg-turbo
-CC="cc -mavx2" pip install --no-cache-dir -U --force-reinstall pillow-simd
+CC="cc -mavx2" pip install --no-cache-dir -U --force-reinstall --no-binary :all: --compile pillow-simd
 ```
+If you only care about faster JPEG decompression, it can be `pillow` or `pillow-simd` in the last command above, the latter speeds up other image processing operations. For the full story see [Pillow-SIMD](https://docs.fast.ai/performance.html#faster-image-processing).
 
 ### PyPI Install
 
@@ -59,17 +60,18 @@ pip install fastai
 
 ### Developer Install
 
-First, follow the instructions above for either `PyPi` or `Conda`. Then uninstall the `fastai` package using the same package manager you used to install it, i.e. `pip uninstall fastai` or `conda uninstall fastai`, and then, replace it with a [pip editable install](https://pip.pypa.io/en/stable/reference/pip_install/#editable-installs).
-
+The following instructions will result in a [pip editable install](https://pip.pypa.io/en/stable/reference/pip_install/#editable-installs), so that you can `git pull` at any time and your environment will automatically get the updates:
 
 ```bash
 git clone https://github.com/fastai/fastai
 cd fastai
 tools/run-after-git-clone
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
-You can test that the build works by starting the jupyter notebook:
+Note that this will install the `cuda9.0` `pytorch` build via default dependencies. If you need a higher or lower `cudaXX` build, following the instructions [here]( https://pytorch.org/get-started/locally/), to install the desired `pytorch` build.
+
+Next, you can test that the build works by starting the jupyter notebook:
 
 ```bash
 jupyter notebook
@@ -82,7 +84,7 @@ Alternatively, you can do a quick CLI test:
 jupyter nbconvert --execute --ExecutePreprocessor.timeout=600 --to notebook examples/tabular.ipynb
 ```
 
-Please refer to [CONTRIBUTING.md](https://github.com/fastai/fastai/blob/master/CONTRIBUTING.md) and  [develop.md](https://github.com/fastai/fastai/blob/master/docs/develop.md) for more details on how to contribute to the `fastai` project.
+Please refer to [CONTRIBUTING.md](https://github.com/fastai/fastai/blob/master/CONTRIBUTING.md) and [Notes For Developers](https://docs.fast.ai/dev/develop.html) for more details on how to contribute to the `fastai` project.
 
 
 

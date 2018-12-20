@@ -45,7 +45,7 @@ def rnn_classifier_split(model:nn.Module) -> List[nn.Module]:
     return groups
 
 class RNNLearner(Learner):
-    "Basic class for a Learner in RNN."
+    "Basic class for a `Learner` in NLP."
     def __init__(self, data:DataBunch, model:nn.Module, bptt:int=70, split_func:OptSplitFunc=None, clip:float=None,
                  adjust:bool=False, alpha:float=2., beta:float=1., metrics=None, **kwargs):
         super().__init__(data, model, **kwargs)
@@ -94,7 +94,7 @@ class LanguageLearner(RNNLearner):
         for _ in progress_bar(range(n_words), leave=False):
             xb, yb = self.data.one_item(text)
             xb = xb.view(-1,1)
-            res = self.pred_batch(batch=(xb,yb))[-1]
+            res = self.pred_batch(batch=(xb,yb))[0][-1]
             if no_unk: res[self.data.vocab.stoi[UNK]] = 0.
             if min_p is not None: res[res < min_p] = 0.
             if temperature != 1.: res.pow_(1 / temperature)
@@ -106,15 +106,13 @@ class LanguageLearner(RNNLearner):
         from IPython.display import display, HTML
         "Show `rows` result of predictions on `ds_type` dataset."
         ds = self.dl(ds_type).dataset
-        self.callbacks.append(RecordOnCPU())
-        preds = self.pred_batch(ds_type)
-        x,y = self.callbacks[-1].input,self.callbacks[-1].target
-        self.callbacks = self.callbacks[:-1]
+        x,y = self.data.one_batch(ds_type, detach=False, denorm=False)
+        preds = self.pred_batch(batch=(x,y))
         y = y.view(*x.size())
         z = preds.view(*x.size(),-1).argmax(dim=2)
-        xs = [ds.x.reconstruct(grab_idx(x, i, self.data._batch_first)) for i in range(rows)]
-        ys = [ds.x.reconstruct(grab_idx(y, i, self.data._batch_first)) for i in range(rows)]
-        zs = [ds.x.reconstruct(grab_idx(z, i, self.data._batch_first)) for i in range(rows)]
+        xs = [ds.x.reconstruct(grab_idx(x, i)) for i in range(rows)]
+        ys = [ds.x.reconstruct(grab_idx(y, i)) for i in range(rows)]
+        zs = [ds.x.reconstruct(grab_idx(z, i)) for i in range(rows)]
 
         items = [['text', 'target', 'pred']]
         for i, (x,y,z) in enumerate(zip(xs,ys,zs)):

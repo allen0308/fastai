@@ -11,7 +11,49 @@ Github. Parentheses after an item show the name or github id of the contributor
 of that change.
 
 
-## 1.0.37.dev0 (Work In Progress)
+
+
+## 1.0.39.dev0 (Work In Progress)
+
+### New:
+
+- `Learner.to_fp32()` to go back to FP32 precision mode.
+
+### Changed:
+
+### Fixed:
+
+- Predictions now work in FP16 mode
+
+
+## 1.0.38 (2018-12-18)
+
+### Breaking changes:
+
+- If you want to import basic fastai functionality without an application, you
+  should now use `from fastai.basics import *` instead of `from fastai import
+  *`. (However note that you now don't need either, when using an application,
+  as mentioned in *Changed* below)
+- In fastai.text batch is now the first dimension
+
+### New:
+
+- `fastai.script` module contains a simple decorator for quickly creating CLIs
+- `setup_distrib` does all setup required for distributed training for you
+- Sample training scripts for MNIST sample (single GPU) and CIFAR10 (multi-GPU fp16) in `examples`
+- `fastai.launch` module for simplified single-machine multi-GPU training
+- `check_perf` - performance improvement recommendations
+- `distributed` module with helper functions to quickly launch a distributed training
+- temptative use of JIT C++ extensions to code the QRNN with `batch_first` argument, it needs a proper installation 
+  of cuda to be compiled at execution time
+
+### Changed:
+
+- When importing an application such as `from fastai.vision import *` you no
+  longer need to also `from fastai import *`
+
+
+## 1.0.37 (2018-12-13)
 
 ### New:
 
@@ -20,6 +62,8 @@ of that change.
 - `sigmoid_range` function to scale sigmoid to given range, along with `SigmoidRange` layer
 - `DataBunch` performs a sanity check after its initialization and will throw a warning if something is wrong with the data.
 - More GAN stuff: `gan_critic`, `AdaptiveLoss`, `accuracy_thresh_expand`, and `GANDiscriminativeLR`
+- Support for one-hot encoded labels in multiclassification problems
+- Add `Dataset.Fix` (same as train but with `shuffle=False`, `drop_last=False` and valid transforms)
 
 ### Changed:
 
@@ -28,6 +72,7 @@ of that change.
 - `DataBunch.export` now serializes everything (transforms and normalization included)
 - `DataBunch` now has `fix_dl` attr, which is same data as `train_dl` but without shuffle or train tfms
 - `pred_batch` now has `reconstruct` param, which will reconstruct each prediction into an object
+- `Learner.show_results` gives a better output for image classification tasks
 
 ### Fixed:
 

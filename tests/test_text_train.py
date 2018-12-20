@@ -1,5 +1,4 @@
 import pytest
-from fastai import *
 from fastai.text import *
 
 pytestmark = pytest.mark.integration
@@ -38,7 +37,7 @@ def test_opt_params(learn):
     assert n_params(learn) == 2
     learn.unfreeze()
     assert n_params(learn) == 6
-    
+
 @pytest.mark.slow
 def manual_seed(seed=42):
     torch.manual_seed(seed)
@@ -99,8 +98,8 @@ def test_classifier():
             classifier = text_classifier_learner(data, bptt=10)
             assert last_layer(classifier.model).out_features == expected_classes
             assert len(data.train_dl) == math.ceil(len(data.train_ds)/data.train_dl.batch_size)
-            assert next(iter(data.train_dl))[0].shape == (9, 2)
-            assert next(iter(data.valid_dl))[0].shape == (9, 2)
+            assert next(iter(data.train_dl))[0].shape == (2, 7)
+            assert next(iter(data.valid_dl))[0].shape == (2, 7)
         finally:
             shutil.rmtree(path)
 
@@ -124,3 +123,14 @@ def test_mem_leak():
     garbage_after = len(gc.garbage)  # again, should be 0, or == garbage_before
     assert garbage_after == 0
 
+def test_order_preds():
+    path, df_trn, df_val = prep_human_numbers()
+    df_val.labels = np.random.randint(0,5,(len(df_val),))
+    data_clas = (TextList.from_df(df_val, path, cols='texts')
+                .split_by_idx(list(range(200)))
+                .label_from_df(cols='labels')
+                .databunch())
+    learn = text_classifier_learner(data_clas)
+    preds = learn.get_preds(ordered=True)
+    true_value = np.array([learn.data.train_ds.c2i[o] for o in df_val.iloc[:200,0]])
+    np.all(true_value==preds[1].numpy())

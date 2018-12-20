@@ -84,7 +84,7 @@ def fit(epochs:int, model:nn.Module, loss_func:LossFunction, opt:optim.Optimizer
                 loss = loss_batch(model, xb, yb, loss_func, opt, cb_handler)
                 if cb_handler.on_batch_end(loss): break
 
-            if hasattr(data,'valid_dl') and data.valid_dl is not None and len(data.valid_ds.items) > 0:
+            if not data.empty_val:
                 val_loss = validate(model, data.valid_dl, loss_func=loss_func,
                                        cb_handler=cb_handler, pbar=pbar)
             else: val_loss=None
@@ -283,6 +283,7 @@ class Learner():
         "Show `rows` result of predictions on `ds_type` dataset."
         #TODO: get read of has_arg x and split_kwargs_by_func if possible
         #TODO: simplify this and refactor with pred_batch(...reconstruct=True)
+        if self.data.train_ds.x._square_show_res: rows = rows ** 2
         ds = self.dl(ds_type).dataset
         self.callbacks.append(RecordOnCPU())
         preds = self.pred_batch(ds_type)
@@ -296,7 +297,7 @@ class Learner():
                 preds = self.data.denorm(preds, do_x=True)
         analyze_kwargs,kwargs = split_kwargs_by_func(kwargs, ds.y.analyze_pred)
         preds = [ds.y.analyze_pred(grab_idx(preds, i), **analyze_kwargs) for i in range(rows)]
-        xs = [ds.x.reconstruct(grab_idx(x, i, self.data._batch_first)) for i in range(rows)]
+        xs = [ds.x.reconstruct(grab_idx(x, i)) for i in range(rows)]
         if has_arg(ds.y.reconstruct, 'x'):
             ys = [ds.y.reconstruct(grab_idx(y, i), x=x) for i,x in enumerate(xs)]
             zs = [ds.y.reconstruct(z, x=x) for z,x in zip(preds,xs)]
@@ -328,7 +329,7 @@ class Recorder(LearnerCallback):
         super().__init__(learn)
         self.opt = self.learn.opt
         self.train_dl = self.learn.data.train_dl
-        self.no_val = False
+        self.no_val,self.silent = False,False
 
     def on_train_begin(self, pbar:PBar, metrics_names:Collection[str], **kwargs:Any)->None:
         "Initialize recording status at beginning of training."
@@ -336,7 +337,7 @@ class Recorder(LearnerCallback):
         self.names = ['epoch', 'train_loss'] if self.no_val else ['epoch', 'train_loss', 'valid_loss']
         self.names += metrics_names
         if hasattr(self, '_added_met_names'): self.names += self._added_met_names
-        self.pbar.write(self.names, table=True)
+        if not self.silent: self.pbar.write(self.names, table=True)
         self.losses,self.val_losses,self.lrs,self.moms,self.metrics,self.nb_batches = [],[],[],[],[],[]
 
     def on_batch_begin(self, train, **kwargs:Any)->None:
@@ -368,7 +369,7 @@ class Recorder(LearnerCallback):
         str_stats = []
         for name,stat in zip(self.names,stats):
             str_stats.append('' if stat is None else str(stat) if isinstance(stat, int) else f'{stat:.6f}')
-        self.pbar.write(str_stats, table=True)
+        if not self.silent: self.pbar.write(str_stats, table=True)
 
     def add_metrics(self, metrics):
         "Add `metrics` to the inner stats."

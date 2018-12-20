@@ -39,7 +39,7 @@ class PreProcessor():
 
 class ItemList():
     "A collection of items with `__len__` and `__getitem__` with `ndarray` indexing semantics."
-    _bunch,_processor,_label_cls,_square_show = DataBunch,None,None,False
+    _bunch,_processor,_label_cls,_square_show,_square_show_res = DataBunch,None,None,False,False
 
     def __init__(self, items:Iterator, path:PathOrStr='.',
                  label_cls:Callable=None, xtra:Any=None, processor:PreProcessor=None, x:'ItemList'=None, **kwargs):
@@ -224,6 +224,9 @@ class ItemList():
     def label_from_df(self, cols:IntsOrStrs=1, **kwargs):
         "Label `self.items` from the values in `cols` in `self.xtra`."
         labels = _maybe_squeeze(self.xtra.iloc[:,df_names_to_idx(cols, self.xtra)])
+        if is_listy(cols) and len(cols) > 1: 
+            new_kwargs = dict(one_hot=True, label_cls=MultiCategoryList, classes= cols)
+            kwargs = {**new_kwargs, **kwargs}
         return self.label_from_list(labels, **kwargs)
 
     def label_const(self, const:Any=0, **kwargs)->'LabelList':
@@ -272,7 +275,7 @@ class CategoryProcessor(PreProcessor):
         return uniqueify(items)
 
     def process_one(self,item):
-        try: return self.c2i.get(item)
+        try: return self.c2i[item] if item is not None else None
         except:
             raise Exception("Your validation data contains a label that isn't present in the training set, please fix your data.")
 
@@ -316,7 +319,7 @@ class CategoryList(CategoryListBase):
 
 class MultiCategoryProcessor(CategoryProcessor):
     "`PreProcessor` that create `classes` from `ds.items` and handle the mapping."
-    def process_one(self,item): return [self.c2i.get(o,None) for o in item]
+    def process_one(self,item): return [super(MultiCategoryProcessor, self).process_one(o) for o in item]
 
     def generate_classes(self, items):
         "Generate classes from `items` by taking the sorted unique values."
@@ -329,14 +332,20 @@ class MultiCategoryProcessor(CategoryProcessor):
 class MultiCategoryList(CategoryListBase):
     "Basic `ItemList` for multi-classification labels."
     _processor=MultiCategoryProcessor
-    def __init__(self, items:Iterator, classes:Collection=None, sep:str=None, **kwargs):
+    def __init__(self, items:Iterator, classes:Collection=None, sep:str=None, one_hot:bool=False, **kwargs):
         if sep is not None: items = array(csv.reader(items.astype(str), delimiter=sep))
         super().__init__(items, classes=classes, **kwargs)
+        if one_hot: 
+            assert classes is not None, "Please provide class names with `classes=...`"
+            self.processor = []
         self.loss_func = BCEWithLogitsFlat()
+        self.one_hot = one_hot
+        self.copy_new += ['one_hot']
 
     def get(self, i):
         o = self.items[i]
         if o is None: return None
+        if self.one_hot: return self.reconstruct(o.astype(np.float32))
         return MultiCategory(one_hot(o, self.c), [self.classes[p] for p in o], o)
 
     def analyze_pred(self, pred, thresh:float=0.5):
@@ -366,7 +375,13 @@ class ItemLists():
     def __init__(self, path:PathOrStr, train:ItemList, valid:ItemList, test:ItemList=None):
         self.path,self.train,self.valid,self.test = Path(path),train,valid,test
         if isinstance(self.train, LabelList): self.__class__ = LabelLists
-
+    
+    def __dir__(self)->List[str]:
+        default_dir = dir(type(self)) + list(self.__dict__.keys())
+        add_ons = ['label_const', 'label_empty', 'label_from_df', 'label_from_folder', 'label_from_func', 
+                   'label_from_list', 'label_from_re']
+        return default_dir + add_ons
+           
     def __repr__(self)->str:
         return f'{self.__class__.__name__};\n\nTrain: {self.train};\n\nValid: {self.valid};\n\nTest: {self.test}'
 
@@ -500,6 +515,8 @@ class LabelList(Dataset):
     def __getattr__(self,k:str)->Any:
         x = super().__getattribute__('x')
         res = getattr(x, k, None)
+        if isinstance(res, Callable):
+            assert 'split' not in res.__name__, "You should split your data before labelling it."
         if res is not None: return res
         y = super().__getattribute__('y')
         res = getattr(y, k, None)
@@ -533,7 +550,7 @@ class LabelList(Dataset):
                  'y_cls':self.y.__class__, 'y_proc':self.y.processor,
                  'path':self.path, 'tfms':self.tfms, 'tfm_y':self.tfm_y, 'tfmargs':self.tfmargs}
         if hasattr(self, 'tfms_y'):    state['tfms_y']    = self.tfms_y
-        if hasattr(self, 'tfmargs_y'): state['tfmargs_y'] = self.tfmargs_y 
+        if hasattr(self, 'tfmargs_y'): state['tfmargs_y'] = self.tfmargs_y
         state = {**state, **kwargs}
         pickle.dump(state, open(fn, 'wb'))
 
